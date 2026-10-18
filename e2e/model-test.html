@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>model test</title></head>
+<body>
+<pre id="log">starting...</pre>
+<script type="module">
+import { pipeline, RawImage, env } from '@huggingface/transformers';
+
+const logEl = document.getElementById('log');
+const log = (m) => {
+  logEl.textContent += m + '\n';
+  console.log(m);
+};
+
+const params = new URLSearchParams(location.search);
+const model = params.get('model');
+const dtype = params.get('dtype') || 'fp32';
+const device = params.get('device'); // wasm | webgpu
+const wasmSuffix = params.has('wasm') ? params.get('wasm') : 'asyncify';
+
+const ORT_VER = '1.31.0-dev.20260914-8d85527a0';
+{
+  const suffix = wasmSuffix === '' ? '' : `.${wasmSuffix}`;
+  env.backends.onnx.wasm.wasmPaths = {
+    mjs: `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VER}/dist/ort-wasm-simd-threaded${suffix}.mjs`,
+    wasm: `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VER}/dist/ort-wasm-simd-threaded${suffix}.wasm`,
+  };
+  log(`wasm build: ort-wasm-simd-threaded${suffix || '(plain)'}`);
+}
+
+const t0 = performance.now();
+try {
+  const adapter = navigator.gpu ? await navigator.gpu.requestAdapter() : null;
+  log(`webgpu adapter: ${adapter ? 'AVAILABLE (' + adapter.info?.architecture?.vendor + ')' : 'unavailable'}`);
+
+  log(`loading ${model} (${dtype}${device ? ', device=' + device : ''})...`);
+  const opts = { dtype };
+  if (device === 'webgpu') opts.device = 'webgpu';
+  const seg = await pipeline('image-segmentation', model, opts);
+  log(`model loaded in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+
+  const c = document.createElement('canvas');
+  c.width = 320;
+  c.height = 320;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#4a90d9';
+  ctx.fillRect(0, 0, 320, 320);
+  ctx.fillStyle = '#e74c3c';
+  ctx.beginPath();
+  ctx.arc(160, 160, 90, 0, Math.PI * 2);
+  ctx.fill();
+  const img = await RawImage.fromCanvas(c);
+
+  const t1 = performance.now();
+  const res = await seg(img);
+  const out = Array.isArray(res) ? res[0] : res;
+  const mask = out.mask;
+  let sum = 0;
+  for (let i = 0; i < mask.data.length; i++) sum += mask.data[i];
+  const mean = sum / mask.data.length;
+  log(`inference done in ${((performance.now() - t1) / 1000).toFixed(1)}s, mask mean=${mean.toFixed(1)} (0=bg, 255=fg)`);
+  log('RESULT: SUCCESS');
+} catch (e) {
+  log(`RESULT: FAIL ${e.message}`);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+# .opencode has its own node_modules — ignore it only, keep .opencode/skills tracked
+.opencode/node_modules/
+
+# Vite build output
+dist/
+
+# Playwright test artifacts (1.64.x defaults: outputDir=test-results,
+# temp artifact dirs .playwright-artifacts-<n>, HTML report)
+test-results/
+playwright-report/
+.playwright-artifacts-*/
+
+# Coverage
+coverage/
+
+# Chrome profile dirs left by manual e2e scripts (verify.mjs / model-test.mjs);
+# appear at repo root and inside e2e/
+.browser-profile
+.browser-profile-*/
+
+# OS cruft
+.DS_Store
+Thumbs.db
