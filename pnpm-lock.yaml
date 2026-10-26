@@ -66,6 +66,9 @@ importers:
       autoprefixer:
         specifier: ^10.6.1
         version: 10.6.1(postcss@8.5.30)
+      docling.rs:
+        specifier: ^2.51.3
+        version: 2.51.3
       eslint:
         specifier: ^8.57.0
         version: 8.57.1(supports-color@7.2.0)
@@ -1208,8 +1211,45 @@ packages:
   dlv@1.1.3:
     resolution: {integrity: sha512-+HlytyjlPKnIG8XuRG8WvmBP8xs8P71y+SKKS6ZXWoEgLuePxtDoUEiH7WkdePWrQ5JBpE6aoVqfZfJUQkjXwA==}
 
+  docling.rs-darwin-arm64@2.51.3:
+    resolution: {integrity: sha512-4F4aqkdF23VcAPrZMQNlUZeJZJwJDA3HwzeVPntEwln0rqss+Cjf9nafJdwkNuREEIiITzlK9mQSVNqKUId/pw==}
+    engines: {node: '>= 14'}
+    cpu: [arm64]
+    os: [darwin]
+
+  docling.rs-linux-arm64-gnu@2.51.3:
+    resolution: {integrity: sha512-lp5BrvYs7zJFQNDEWQ/QTKsbnnW3WJwVAC9pe4v1bq00l7TJIZSwjzU/JLg4zGhHwrtA7qsYrnocc0cYxemOLw==}
+    engines: {node: '>= 14'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  docling.rs-linux-s390x-gnu@2.51.3:
+    resolution: {integrity: sha512-Hqzkb8lP6ZV5s2UgWxh3hEWW4TFsTv2+vqyLgoDLf7aYsCWaSohajjC4CRaG+nCAvEjJSHPVnD036gGyZ6pJrA==}
+    engines: {node: '>= 14'}
+    cpu: [s390x]
+    os: [linux]
+    libc: [glibc]
+
+  docling.rs-linux-x64-gnu@2.51.3:
+    resolution: {integrity: sha512-MkL+70AMopK6KghDFEntGPQHEjhM+pLbvXNQ8mnuIP9qSv12oKlOnmqOpYYnne5uWQUal2Of4FpL29DsPzArfg==}
+    engines: {node: '>= 14'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
   docling.rs-wasm@2.46.3:
     resolution: {integrity: sha512-MzB4Dqyo5qLYOeMiDMXGQjU/nOSK9Nhif+zLxOCvNaWQWJyKWluW/1EXBYoKpijNXKOgca1EFyI8OutM7X9hnA==}
+
+  docling.rs-win32-x64-msvc@2.51.3:
+    resolution: {integrity: sha512-rzNOlWjcbmdPPjIkV3EDbTq2ju44Zpjgng9gsRpQh9qSbQoJQeY/GhDIg+cFYkDF0d87SbXq9Leh+pqKA76u0g==}
+    engines: {node: '>= 14'}
+    cpu: [x64]
+    os: [win32]
+
+  docling.rs@2.51.3:
+    resolution: {integrity: sha512-YJt1HIjYNThpiOjnfYzK7rI5s8CHm80latCRcg2uUqh7bqwme57MLiZU4Ve21auxCgPFGZ0VQCeQP1mZLRwd/Q==}
+    engines: {node: '>= 14'}
 
   doctrine@2.1.0:
     resolution: {integrity: sha512-35mSku4ZXK0vfCuHEDAwt55dg2jNajHZ1odvF+8SSr82EsZY4QmXfuWso8oEd8zRhVObSN18aM0CjSdoBX7zIw==}
@@ -3555,7 +3595,30 @@ snapshots:
 
   dlv@1.1.3: {}
 
+  docling.rs-darwin-arm64@2.51.3:
+    optional: true
+
+  docling.rs-linux-arm64-gnu@2.51.3:
+    optional: true
+
+  docling.rs-linux-s390x-gnu@2.51.3:
+    optional: true
+
+  docling.rs-linux-x64-gnu@2.51.3:
+    optional: true
+
   docling.rs-wasm@2.46.3: {}
+
+  docling.rs-win32-x64-msvc@2.51.3:
+    optional: true
+
+  docling.rs@2.51.3:
+    optionalDependencies:
+      docling.rs-darwin-arm64: 2.51.3
+      docling.rs-linux-arm64-gnu: 2.51.3
+      docling.rs-linux-s390x-gnu: 2.51.3
+      docling.rs-linux-x64-gnu: 2.51.3
+      docling.rs-win32-x64-msvc: 2.51.3
 
   doctrine@2.1.0:
     dependencies:

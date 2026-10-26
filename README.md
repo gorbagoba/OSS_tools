@@ -39,13 +39,15 @@ Then open http://localhost:5174.
 | `pnpm lint:fix` | ESLint with autofix |
 | `pnpm typecheck` | TypeScript check, no emit |
 | `pnpm test` | Playwright e2e smoke suite (chromium) |
+| `pnpm run md-convert` | Terminal batch MD converter — PDF/PPTX/DOCX → Markdown natively (see [docs/terminal-converter.md](docs/terminal-converter.md)) |
 
 ## Testing
 
-- `pnpm test` runs `e2e/smoke.spec.ts` + `e2e/mask-refine.spec.ts` —
-  13 tests (dropdown nav, new tool pages, QR render, photo editor worker +
-  filter + reset persistence, mask refine math, a11y). No model downloads;
-  fast.
+- `pnpm test` runs `e2e/smoke.spec.ts` + `e2e/tools.spec.ts` + `e2e/mask-refine.spec.ts` —
+  24 tests (dropdown nav, all tool pages, QR render + download naming, photo editor
+  worker + filter, PDF Toolkit merge/extract/rotate/delete, image compression, HEIC
+  rejection, MD converter incl. per-file batch with real downloads, mask refine
+  math, a11y). No AI model downloads; fast.
 - MD Converter (PDF/PPTX) uses docling.rs-wasm in a worker; PDF
   images are compacted to WebP via OffscreenCanvas. DOCX is converted with
   `mammoth` (no AI models). Tested manually via browser; downloads ~78 MB
@@ -59,19 +61,35 @@ Then open http://localhost:5174.
 src/
   components/   # React UI: BackgroundRemover, PhotoEditor, QRGenerator, ConvertToMarkdown, PDFToolkit, ImageCompressor, HeicConverter, ToastProvider, layout, a11y
   hooks/        # useWorker (worker pool), useQRGenerator, useA11y
-  lib/          # filters, doclingClient, pdfTools, compactImages, logger, storage, validators
-  workers/      # doclingConvert.worker + shared worker code
+  lib/          # filters, doclingClient, pdfTools, compactImages, logger, storage
+  workers/      # doclingConvert.worker + photo.worker (filter kernels)
   types/        # shared TypeScript types
-e2e/            # Playwright smoke spec, manual verify/model-test scripts, fixtures
-docs/           # PRD, ARCHITECTURE, TASKS, TEST_RESULTS
+cli/            # md-convert.mjs — terminal batch converter (docling.rs native bindings)
+e2e/            # Playwright specs, fixtures, model-test diagnostics
+docs/           # PRD, ARCHITECTURE, TASKS, TEST_RESULTS, terminal-converter
 ```
+
+## Terminal converter (large PDFs)
+
+The browser MD Converter runs docling in WebAssembly — fine up to mid-size
+files, but a wasm memory cap and worker overhead slow very large PDFs. The
+CLI runs the same engine **natively** with a warm model pipeline:
+
+```bash
+pnpm run md-convert -- ~/scans/ --out ~/markdown-out/
+```
+
+Per-page progress + ETA, `.md` written per file, `--fast` for text-layer-only
+PDFs. Full guide: [docs/terminal-converter.md](docs/terminal-converter.md).
 
 ## Notes
 
 - The background remover needs internet **on first use only** — the ModNet
   model (~115 MB) is downloaded then and reused afterwards.
-- The photo editor's worker pool runs filters in Web Workers created from
-  inline Blob URLs, with an automatic main-thread fallback when Workers
-  are unavailable.
-- The PDF to Markdown converter uses `@pdf2md/core` for client-side PDF
-  processing. Large files (>50MB) may take several seconds to process.
+- The photo editor's worker pool runs filters in `src/workers/photo.worker.ts`
+  (Vite module worker importing `lib/filters` kernels), with an automatic
+  main-thread fallback when Workers are unavailable.
+- The PDF to Markdown converter uses `docling.rs-wasm` (Rust port of docling)
+  in a worker for layout-aware conversion with OCR; large files may take a
+  while — that is what the [terminal converter](docs/terminal-converter.md)
+  is for.

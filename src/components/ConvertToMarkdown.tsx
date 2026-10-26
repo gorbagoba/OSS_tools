@@ -754,6 +754,23 @@ export function ConvertToMarkdown(): React.JSX.Element {
         happens locally in your browser.
       </p>
 
+      <p className="mb-4 text-sm text-textSecondary border border-border rounded-lg p-3 bg-input/40">
+        Very large PDF? The browser runs on WebAssembly — the
+        {' '}
+        <a
+          href="https://github.com/gorbagoba/OSS_tools/blob/main/docs/terminal-converter.md"
+          target="_blank"
+          rel="noreferrer"
+          className="text-primary underline hover:opacity-80"
+        >
+          terminal converter
+        </a>
+        {' '}
+        runs natively and batch-converts whole folders much faster:
+        {' '}
+        <code className="text-xs">pnpm run md-convert -- folder/</code>
+      </p>
+
       {/* Speed selector (PDF only — DOCX/PPTX conversion is always instant) */}
       <div className="mb-4 p-3 rounded-xl border border-border bg-input/40" role="radiogroup" aria-label="Conversion mode">
         <div className="flex flex-col sm:flex-row gap-2">

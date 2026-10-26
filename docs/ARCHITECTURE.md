@@ -16,12 +16,12 @@ Frontend-only SPA (`PROJECT_TYPE=frontend-only`): client-only, no API → no API
 bg-remover/
 ├── index.html                # Vite entry (#root)
 ├── package.json              # scripts + deps (pnpm canonical)
-├── pnpm-lock.yaml, pnpm.config.yaml  # canonical lockfile (ignoreBuilds)
-├── package-lock.json         # leftover npm lockfile (H1: delete)
+├── pnpm-lock.yaml, pnpm-workspace.yaml  # canonical lockfile (allowBuilds map)
 ├── tsconfig.json             # TS strict + exactOptionalPropertyTypes + verbatimModuleSyntax
 ├── vite/tailwind/postcss/eslint/prettier configs, AGENTS.md
-├── docs/                     # PRD.md, TASKS.md, ARCHITECTURE.md (this file)
-├── dist/                     # build output (H5: gitignore)
+├── docs/                     # PRD.md, TASKS.md, ARCHITECTURE.md (this file), terminal-converter.md
+├── dist/                     # build output (gitignored)
+├── .models/                  # docling.rs CLI model cache (gitignored, ~250 MB after first download)
 ├── src/
 │   ├── main.tsx              # StrictMode > A11yProvider > App; tailwind.css
 │   ├── app.tsx               # Router + Layout; / · /photo-editor · /qr-generator · /convert-to-markdown · /pdf-toolkit · /image-compressor · /heic-converter (+ legacy redirects)
@@ -30,12 +30,14 @@ bg-remover/
 │   │                         # ConvertToMarkdown, PDFToolkit, ImageCompressor, HeicConverter, ToastProvider, Spinner, ErrorBoundary
 │   ├── hooks/                # useWorker, useQRGenerator, useA11y, index
 │   ├── lib/                  # filters, pdfTools (pdf.js thumbs + helpers), doclingClient, storage, compactImages
-│   ├── types/                # filters, worker, models, events, docling, heic2any.d.ts, filesystem.d.ts
-│   └── workers/              # doclingConvert.worker.ts (wasm+ORT pipeline)
+│   ├── types/                # filters, worker, events, docling, heic2any.d.ts
+│   └── workers/              # doclingConvert.worker.ts (wasm+ORT pipeline), photo.worker.ts (filter kernels)
+├── cli/
+│   └── md-convert.mjs        # Terminal batch MD converter — docling.rs native napi addon, warm Pipeline, default full pipeline + live timestamped log (docs/terminal-converter.md; models in .models/, gitignored)
 └── e2e/
-    ├── verify.mjs            # manual full pipeline (Chromium, ~115 MB model) — excluded from gate
-    ├── model-test.mjs/.html  # ModNet download/inference diagnostics
-    └── .browser-profile*/    # browser profile cache (junk; H5: gitignore)
+    ├── smoke.spec.ts, tools.spec.ts, mask-refine.spec.ts   # Playwright gate (24 tests)
+    ├── make-fixture.mjs      # generates e2e/fixtures/gradient.png (used by smoke)
+    └── model-test.mjs/.html  # ModNet download/inference diagnostics
 ```
 
 ## Components & modules inventory
@@ -66,6 +68,7 @@ bg-remover/
 | `workers/utils.ts` | Canonical FilterType + WorkerMessage/Result/Error; separable convolution; transferables |
 | `workers/doclingConvert.worker.ts` | Owns docling.rs-wasm converters + ORT sessions; fetches models (HF, 3-attempt retry, progress posts); probes text layer → digital vs scanned mode; per-page layout inference; emits markdown with embedded images |
 | `lib/doclingClient.ts` | Main-thread driver: pdf.js rasterization (scale 2) + 1-deep lookahead pipeline overlapping raster with inference; worker lifecycle, waits, abort |
+| `cli/md-convert.mjs` | **Terminal MD converter**: `docling.rs` napi addon (native ONNX Runtime, no wasm cap). Modes: `--full` (default) / `--auto` / `--fast` via shared pipelineOpts (`strict`, `headingHierarchy`, `pictureAltText`, `metadata:'frontmatter'`, `textLayerOnly` per mode; `ocrTextlineOrientation` only when deps present); PDFs → warm `Pipeline.convertFileAsync`, DOCX/PPTX → `DocumentConverter`; outputOpts (`imageMode`, `pageBreakPlaceholder`); live timestamped log (batch header, file start, per-page `page_completed` via `event.kind`/`completed_pages`, enrichment, per-file done + summary); `.md` next to sources or `--out`; exit 1 on any failure |
 | `types/docling.ts` | Worker protocol types (convert/addPage/finish → model/stage/mode/pageDone/done/error) |
 | `types/*` | Shared types (models, worker, events, component props) |
 
@@ -109,8 +112,8 @@ bg-remover/
 
 ## Testing strategy
 
-- Gate G3: Playwright e2e smoke specs (`e2e/*.spec.ts`) + `playwright.config.ts` (webServer: `vite preview` of dist; testMatch `*.spec.ts`) — added in T6; covers PRD acceptance: route renders, worker badge truthful, reset persists defaults, no spurious announcements, QR renders.
-- Manual (excluded from gate): `e2e/verify.mjs` full pipeline in real Chromium incl. 115 MB model download; `model-test.mjs/.html` ModNet diagnostics.
+- Gate G3: Playwright e2e specs (`e2e/*.spec.ts`) + `playwright.config.ts` — 24 tests: smoke (nav dropdown, tool pages, QR, photo editor, a11y), tools (MD converter incl. per-file batch + real downloads, PDF Toolkit ops, Image Compressor, HEIC, QR download naming), mask-refine math (8, node-context).
+- Manual (excluded from gate): `e2e/model-test.mjs/.html` ModNet diagnostics; CLI verified manually on generated PDFs (`cli/md-convert.mjs`).
 - No unit-test runner (no jest/vitest): gates = typecheck + lint + e2e smoke.
 
 ## Build & tooling

@@ -4,81 +4,57 @@
 
 | Stage | Status |
 | --- | --- |
-| Tests (Playwright) | ✅ 12/12 passed |
+| Tests (Playwright) | ✅ 24/24 passed |
 | Typecheck | ✅ Passed |
-| Lint | ✅ Passed |
-| Production Build | ✅ Built |
+| Lint | ✅ Passed (0 errors, 0 warnings) |
+| Production Build | ✅ Built (8.8s, 683 modules) |
 
 ## Test Execution
 
 ### Playwright E2E Tests (chromium)
 
-```
-Running 12 tests using 2 workers
+Latest run (24 passed, 10.4s, 3 workers):
 
-  ✓   1 [chromium] › e2e\mask-refine.spec.ts:8:3 › refineMask › grow: dilates the boundary one pixel into the background (6ms)
-  ✓   2 [chromium] › e2e\smoke.spec.ts:56:1 › app loads, nav + no console errors (1.3s)
-  ✓   3 [chromium] › e2e\mask-refine.spec.ts:13:3 › refineMask › feather: gaussian-blurs the boundary (1ms)
-  ✓   4 [chromium] › e2e\mask-refine.spec.ts:20:3 › refineMask › alphaBoost: lifts mid alpha and clamps at 1 (3ms)
-  ✓   5 [chromium] › e2e\mask-refine.spec.ts:27:3 › refineMask › uses channel 0 for interleaved RGBA input (1ms)
-  ✓   6 [chromium] › e2e\mask-refine.spec.ts:34:3 › refineMask › 1x1 masks survive default options (1ms)
-  ✓   7 [chromium] › e2e\mask-refine.spec.ts:39:3 › refineMask › 2D: vertical bar grows on both sides, not beyond (6ms)
-  ✓   8 [chromium] › e2e\mask-refine.spec.ts:56:3 › refineMask › default options keep interior opaque and stay in [0,1] (8ms)
-  ✓   9 [chromium] › e2e\mask-refine.spec.ts:67:3 › refineMask › rejects data length that does not match dimensions (6ms)
-  ✓  10 [chromium] › e2e\smoke.spec.ts:76:1 › QR renders modules (1.0s)
-  ✓  11 [chromium] › e2e\smoke.spec.ts:114:1 › photo editor: worker active + grayscale + reset persists (774ms)
-  ✓  12 [chromium] › e2e\smoke.spec.ts:200:1 › no spurious a11y announcement on mount (1.8s)
+| Spec | Tests | Coverage |
+| --- | --- | --- |
+| `e2e/mask-refine.spec.ts` | 8 | Mask refinement algorithms: grow, feather, alphaBoost, channel handling, bounds validation |
+| `e2e/smoke.spec.ts` | 5 | Dropdown nav + console-error watch, new tool pages render, QR modules, photo editor worker, a11y mount |
+| `e2e/tools.spec.ts` | 11 | MD Converter single + batch PDF→MD (real downloads), legacy route redirects, PDF Toolkit (merge/extract/rotate+delete/images→PDF), Image Compressor, HEIC rejection toast, QR download naming |
 
-12 passed (6.9s)
-```
-
-### Test Coverage
-
-- `e2e/mask-refine.spec.ts`: 8 tests for mask refinement algorithms (grow, feather, alphaBoost, channel handling)
-- `e2e/smoke.spec.ts`: 4 smoke tests for app navigation, QR rendering, photo editor, and a11y
+Helpers: `e2e/make-fixture.mjs` generates `e2e/fixtures/gradient.png`; `tools.spec.ts` builds text-layer PDFs at runtime via pdf-lib.
 
 ## Build Verification
 
-### Production Build Output
+### Production Build Output (key chunks)
 
 ```
-dist/
-├── index.html                    0.38 kB (gzip: 0.27 kB)
-└── assets/
-    ├── index-DcL2_aci.css       18.49 kB (gzip: 4.41 kB)
-    ├── index-B6Ari2Wd.js         6.98 kB (gzip: 3.73 kB, map: 20.99 kB)
-    ├── index-Ckj4qbrR.js      900.97 kB (gzip: 272.42 kB, map: 3,939.41 kB)
-    ├── pdf-DeWlx49F.js       458.43 kB (gzip: 136.01 kB, map: 1,489.45 kB)
-    ├── pdf-C0-xfYc7.js       517.87 kB (gzip: 156.91 kB, map: 1,804.95 kB)
-    ├── pdf.worker.min-iDqQPrd3.mjs 1,232.30 kB
-    └── ort-wasm-simd-threaded.asyncify-CxOG5pUO.wasm 26,861.78 kB
+dist/assets/index-2AAeW6y9.js        1,199.56 kB (gzip: 357.67 kB)
+dist/assets/index-3uEcpffg.js          436.84 kB (gzip: 181.12 kB, pdf-lib)
+dist/assets/index-0-IXl67R.js          304.30 kB (gzip:  98.57 kB, mammoth, lazy)
+dist/assets/heic2any-Blbre6cY.js     1,352.89 kB (gzip: 341.25 kB, lazy)
+dist/assets/encode-baYmOH9c.js          2.29 kB (avif encoder entry, lazy)
+dist/assets/photo.worker-FWk1VN59.js    2.53 kB
+dist/assets/doclingConvert.worker-*.js 94.91 kB
+dist/assets/pdf.worker.min-*.mjs     1,232.30 kB
+dist/assets/docling_wasm_bg-*.wasm   16,995.97 kB (lazy)
+dist/assets/ort-wasm-simd-threaded.asyncify-*.wasm 26,861.78 kB (lazy)
 ```
 
-**Build time**: 6.07s
-
-**Note**: Large chunks (>500 kB) are expected for PDF processing (`pdf.worker.min-iDqQPrd3.mjs` at 1.2 MB). Code-splitting could be applied if needed.
+**Note**: Heavy wasm/ML chunks are lazy-loaded on first tool use; the initial page load only ships the main bundle.
 
 ### Preview Server
 
-- Started successfully on `http://localhost:4173/`
-- All routes accessible including new `/pdf-to-markdown` endpoint
+`pnpm run preview` serves `dist/` on `http://localhost:4174/` (strictPort; COOP/COEP headers included, required for the docling wasm worker).
 
 ## Failing Cases
 
-**None** - All tests passed.
-
-## Issues Found & Fixed
-
-1. **Navigation menu item count mismatch**
-   - Issue: Test expected 3 menu items, layout had 4 (added "PDF to Markdown")
-   - Fix: Updated `e2e/smoke.spec.ts` to expect 4 menu items and verify "PDF to Markdown" link
-   - Result: Tests now pass
+**None** — all tests passed.
 
 ## Gate Status
 
 | Gate | Status | Details |
 | --- | --- | --- |
 | G1 (PRD) | ✅ | Requirements documented in PRD.md |
-| G2 (Architecture) | ✅ | Architecture and API contracts documented |
-| G3 (Tests) | ✅ | Typecheck clean, lint clean, all 12 tests pass |
+| G2 (Architecture) | ✅ | Architecture documented (frontend-only, no API contract needed) |
+| G3 (Tests) | ✅ | Typecheck clean, lint clean, all 24 tests pass |
 | G4 (Build) | ✅ | Production build succeeds, preview runs |

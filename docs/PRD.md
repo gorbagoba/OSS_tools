@@ -58,6 +58,11 @@ Frontend-only web app (React 19 + TypeScript + Vite 5 + Tailwind 3). Four client
 - As an iPhone user, I want to convert .heic/.heif photos to JPEG, so that they open anywhere. Acceptance: dropping HEIC files produces JPEG outputs with preview thumbnails; multi-page HEICs produce one JPEG per page; quality slider controls JPEG quality.
 - As a user, I want batch conversion with per-output downloads, so that I can convert a whole camera roll. Acceptance: multiple files convert sequentially; each output has its own Download button; input files never leave the device.
 
+### Terminal MD Converter (CLI, `pnpm run md-convert`)
+
+- As a user with very large PDFs, I want to convert them from the terminal with native (non-wasm) speed and maximum fidelity, so that conversion is not limited by browser resources and formatting survives. Acceptance: `pnpm run md-convert -- <files-or-folders> [flags]` defaults to the full pipeline (layout model recovers headings/tables, verbatim casing) and converts PDF/PPTX/DOCX recursively with a live timestamped log (per-page + per-file + summary); `--fast`/`--auto` trade fidelity for speed; models load once and stay warm across the batch; `.md` files are written next to sources (or into `--out`); exit code 1 if any file failed.
+- As a web-page user hitting the wasm ceiling, I want to be pointed to the terminal converter, so that I can switch for big files. Acceptance: the MD Converter page shows a "Very large PDF?" note linking to `docs/terminal-converter.md` with the command example.
+
 ## Acceptance Criteria
 
 | Story | Verifiable criterion (Playwright e2e) |
@@ -79,6 +84,8 @@ Frontend-only web app (React 19 + TypeScript + Vite 5 + Tailwind 3). Four client
 | PDF: merge/extract/rotate/delete/images→pdf | Thumbnails render per added PDF; selection badges show click order; each op downloads the expected output file(s); source files unchanged |
 | Compressor: batch re-encode | Format/quality/resize controls apply; rows show sizes + savings; "Download all" works; bigger-than-original outputs flagged |
 | HEIC: convert | .heic drop → JPEG thumbnails + per-output download; quality slider honored |
+| CLI: batch convert | `node cli/md-convert.mjs` on generated PDFs → per-file `.md` outputs with live log lines; default full pipeline detects headings + preserves casing; `--fast` skips model work; non-PDF paths skipped with notice |
+| CLI: webpage pointer | MD Converter page shows terminal-converter docs link with command example |
 | A11y: no spurious announcement | Page load → aria-live region does NOT announce "Processing complete" |
 | A11y: base support | Skip link reachable by keyboard; focus lands on main content after route change |
 | Build health | `tsc --noEmit` clean, eslint clean, e2e smoke suite green, `vite build` succeeds |
