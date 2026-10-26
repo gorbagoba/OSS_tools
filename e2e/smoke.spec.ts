@@ -3,8 +3,10 @@
  * (ModNet = 115MB download, excluded from the automated gate).
  *
  * Locator sources (read from source at test-authoring time):
- *  - Layout.tsx: nav menubar (role="menubar" aria-label="Primary") with 3
- *    role="menuitem" links: "Background Remover", "Photo Editor",
+ *  - Layout.tsx: nav is a single "Tools" dropdown button (aria-haspopup="menu",
+ *    aria-label "Tools menu, current tool: …"). Menu renders 7 role="menuitem"
+ *    links grouped Image/Document/Utility: "Background Remover", "Photo Editor",
+ *    "Image Compressor", "HEIC → JPG", "MD Converter", "PDF Toolkit",
  *    "QR Generator". <main role="main" id="main-content">.
  *  - QRGenerator.tsx: text input has NO associated label (no htmlFor/id);
  *    it carries placeholder "Enter text, URL, or contact info...".
@@ -53,22 +55,55 @@ function assertNoConsoleErrors(errors: string[]): void {
   expect(errors, `unexpected console errors: ${JSON.stringify(errors)}`).toHaveLength(0);
 }
 
-test('app loads, nav + no console errors', async ({ page }) => {
+test('app loads, dropdown nav + no console errors', async ({ page }) => {
   const errors = trackConsoleErrors(page);
   await neutralizeFavicon(page);
   await page.goto('/');
 
-  // Layout.tsx: 3 role="menuitem" links in the Primary menubar
+  // Layout.tsx: dropdown closed by default; opens via "Tools" button
+  const menuButton = page.getByRole('button', { name: /Tools menu/ });
+  await expect(menuButton).toBeVisible();
   const menuItems = page.locator('nav [role="menuitem"]');
-  await expect(menuItems).toHaveCount(3);
+  await expect(menuItems).toHaveCount(0);
+
+  await menuButton.click();
+  await expect(menuItems).toHaveCount(7);
   await expect(menuItems.nth(0)).toHaveText('Background Remover');
-  await expect(menuItems.nth(1)).toHaveText('Photo Editor');
-  await expect(menuItems.nth(2)).toHaveText('QR Generator');
+  await expect(menuItems.nth(2)).toHaveText('Image Compressor');
+  await expect(menuItems.nth(3)).toHaveText('HEIC → JPG');
+  await expect(menuItems.nth(4)).toHaveText('MD Converter');
+  await expect(menuItems.nth(5)).toHaveText('PDF Toolkit');
+  await expect(menuItems.nth(6)).toHaveText('QR Generator');
+
+  // navigating from the menu closes it and lands on the route
+  await menuItems.nth(4).click();
+  await expect(page).toHaveURL(/convert-to-markdown/);
+  await expect(menuItems).toHaveCount(0);
 
   await expect(page.getByRole('main')).toBeVisible();
 
   // settle window for late console output (HMR, worker init, etc.)
   await page.waitForTimeout(500);
+  assertNoConsoleErrors(errors);
+});
+
+test('new tool pages render: PDF Toolkit, Image Compressor, HEIC', async ({ page }) => {
+  const errors = trackConsoleErrors(page);
+  await neutralizeFavicon(page);
+
+  await page.goto('/pdf-toolkit');
+  await expect(page.getByRole('heading', { name: 'PDF Toolkit', level: 1 })).toBeVisible();
+  await expect(page.getByText('Drop PDFs here, or click to browse')).toBeVisible();
+
+  await page.goto('/image-compressor');
+  await expect(page.getByRole('heading', { name: 'Image Compressor', level: 1 })).toBeVisible();
+  await expect(page.locator('#ic-format')).toBeVisible();
+
+  await page.goto('/heic-converter');
+  await expect(page.getByRole('heading', { name: 'HEIC → JPG Converter', level: 1 })).toBeVisible();
+  await expect(page.locator('#heic-quality')).toBeVisible();
+
+  await page.waitForTimeout(300);
   assertNoConsoleErrors(errors);
 });
 
@@ -110,7 +145,7 @@ test('QR renders modules', async ({ page }) => {
   assertNoConsoleErrors(errors);
 });
 
-test('photo editor: worker active + grayscale + reset persists', async ({ page }) => {
+test('photo editor: worker active + grayscale + reset', async ({ page }) => {
   const errors = trackConsoleErrors(page);
   await neutralizeFavicon(page);
   await page.goto('/photo-editor');
@@ -177,20 +212,10 @@ test('photo editor: worker active + grayscale + reset persists', async ({ page }
     )
     .toBe(true);
 
-  // reset: Brightness slider back to default (0) and settings persisted
+  // reset: Brightness slider back to default (0); persistence was removed
+  // (settings were write-only — nothing ever restored them on load)
   await page.getByRole('button', { name: 'Reset All', exact: true }).click();
   await expect(brightness).toHaveValue('0');
-
-  const stored = await page.evaluate(() => {
-    const raw = window.localStorage.getItem('bgremover_photo_editor_settings');
-    return raw === null ? null : (JSON.parse(raw) as Record<string, unknown>);
-  });
-  expect(stored, 'bgremover_photo_editor_settings should be written on reset').not.toBeNull();
-  expect(stored.brightness).toBe(0);
-  expect(stored.contrast).toBe(0);
-  expect(stored.saturation).toBe(0);
-  expect(stored.exposure).toBe(0);
-  expect(stored.lastFilter).toBe('none');
 
   await page.waitForTimeout(300);
   assertNoConsoleErrors(errors);

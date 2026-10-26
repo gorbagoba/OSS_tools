@@ -17,6 +17,9 @@ export interface WorkerPoolStatus {
   workerCount: number;
 }
 
+/** Monotonic request id: workers echo it so parallel requests cannot swap results. */
+let nextRequestId = 0;
+
 /**
  * Hook to manage worker pool for image processing
  * @param initialWorkerCount Initial number of workers to create
@@ -121,6 +124,9 @@ export function useWorker(initialWorkerCount: number = 4) {
       const worker = workersRef.current[nextWorkerIndexRef.current];
       nextWorkerIndexRef.current = (nextWorkerIndexRef.current + 1) % workersRef.current.length;
 
+      const requestId = nextRequestId;
+      nextRequestId += 1;
+
       const processingStartTime = performance.now();
 
       return await new Promise((resolve, reject) => {
@@ -131,6 +137,9 @@ export function useWorker(initialWorkerCount: number = 4) {
 
         const onMessage = (event: MessageEvent<WorkerResult | WorkerError>) => {
           const msg = event.data;
+
+          // Another in-flight request on this worker produced this message.
+          if (msg.id !== requestId) return;
 
           if (msg.type === 'result') {
             cleanup();
@@ -162,9 +171,15 @@ export function useWorker(initialWorkerCount: number = 4) {
         worker.addEventListener('message', onMessage);
         worker.addEventListener('error', onError);
 
+        // Transfer a COPY of the buffer: transferring data.data.buffer itself
+        // detaches the caller's ImageData (originalImageData), breaking all
+        // later putImageData/reads on the main thread (e.g. Reset All).
+        const bufferCopy = data.data.buffer.slice(0);
+
         const message: WorkerMessage = {
           type: 'process',
-          data: data.data.buffer,
+          id: requestId,
+          data: bufferCopy,
           width: data.width,
           height: data.height,
           filter,
@@ -221,179 +236,11 @@ export function useWorker(initialWorkerCount: number = 4) {
 }
 
 /**
- * Create a worker instance from inline script
+ * Create a worker instance: Vite module worker sharing the filter kernels
+ * from lib/filters (single source of truth, no duplicated inline script).
  */
 function createWorker(): Worker {
-  const workerScript = `
-    self.onmessage = function(event) {
-      const message = event.data;
-
-      if (message.type === 'init') {
-        self.postMessage({ type: 'ready' });
-        return;
-      }
-
-      const { data, width, height, filter } = message;
-      
-      try {
-        const startTime = performance.now();
-        
-        const imageData = new ImageData(new Uint8ClampedArray(data), width, height);
-        let resultImageData;
-        
-        switch (filter) {
-          case 'grayscale':
-            resultImageData = applyGrayscale(imageData);
-            break;
-          case 'sepia':
-            resultImageData = applySepia(imageData);
-            break;
-          case 'invert':
-            resultImageData = applyInvert(imageData);
-            break;
-          case 'blur':
-            resultImageData = applyBlurWorker(imageData);
-            break;
-          case 'sharpen':
-            resultImageData = applySharpenWorker(imageData);
-            break;
-          case 'emboss':
-            resultImageData = applyEmbossWorker(imageData);
-            break;
-          default:
-            throw new Error('Unknown filter: ' + filter);
-        }
-        
-        const processingTime = performance.now() - startTime;
-        
-        const result = {
-          type: 'result',
-          data: resultImageData.data.buffer,
-          width: resultImageData.width,
-          height: resultImageData.height,
-          filter,
-          processingTime,
-          transferTime: 0
-        };
-        
-        self.postMessage(result, [resultImageData.data.buffer]);
-      } catch (error) {
-        self.postMessage({
-          type: 'error',
-          message: error.message || 'Unknown error',
-          filter
-        });
-      }
-    };
-    
-    function applyGrayscale(imageData) {
-      const { width, height, data } = imageData;
-      const result = new Uint8ClampedArray(data);
-      for (let i = 0; i < result.length; i += 4) {
-        const gray = 0.299 * result[i] + 0.587 * result[i + 1] + 0.114 * result[i + 2];
-        result[i] = gray;
-        result[i + 1] = gray;
-        result[i + 2] = gray;
-      }
-      return new ImageData(result, width, height);
-    }
-    
-    function applySepia(imageData) {
-      const { width, height, data } = imageData;
-      const result = new Uint8ClampedArray(data);
-      for (let i = 0; i < result.length; i += 4) {
-        const r = result[i], g = result[i + 1], b = result[i + 2];
-        result[i] = Math.min(255, 0.393 * r + 0.769 * g + 0.189 * b);
-        result[i + 1] = Math.min(255, 0.349 * r + 0.686 * g + 0.168 * b);
-        result[i + 2] = Math.min(255, 0.272 * r + 0.534 * g + 0.131 * b);
-      }
-      return new ImageData(result, width, height);
-    }
-    
-    function applyInvert(imageData) {
-      const { width, height, data } = imageData;
-      const result = new Uint8ClampedArray(data);
-      for (let i = 0; i < result.length; i += 4) {
-        result[i] = 255 - result[i];
-        result[i + 1] = 255 - result[i + 1];
-        result[i + 2] = 255 - result[i + 2];
-      }
-      return new ImageData(result, width, height);
-    }
-    
-    function applyBlurWorker(imageData) {
-      return applySeparableConvolution(imageData, [0.0625, 0.25, 0.375, 0.25, 0.0625], [0.0625, 0.25, 0.375, 0.25, 0.0625]);
-    }
-    
-    function applySharpenWorker(imageData) {
-      return applySeparableConvolution(imageData, [-0.25, 1.5, -0.25], [-0.25, 1.5, -0.25], 0, 1);
-    }
-    
-    function applyEmbossWorker(imageData) {
-      return applySeparableConvolution(imageData, [-1, 0, 1], [-1, 0, 1], 128, 1);
-    }
-    
-    function applySeparableConvolution(imageData, horizontalKernel, verticalKernel, offset, scale) {
-      const { width, height, data } = imageData;
-      const result = new Uint8ClampedArray(data);
-      const radius = Math.floor(horizontalKernel.length / 2);
-      const temp = new Float32Array(width * height * 4);
-      
-      for (let y = 0; y < height; y++) {
-        for (let x = radius; x < width - radius; x++) {
-          let r = 0, g = 0, b = 0, a = 0;
-          for (let k = 0; k < horizontalKernel.length; k++) {
-            const kx = x + k - radius;
-            const idx = (y * width + kx) * 4;
-            const weight = horizontalKernel[k];
-            r += data[idx] * weight;
-            g += data[idx + 1] * weight;
-            b += data[idx + 2] * weight;
-            a += data[idx + 3] * weight;
-          }
-          const idx = (y * width + x) * 4;
-          temp[idx] = r;
-          temp[idx + 1] = g;
-          temp[idx + 2] = b;
-          temp[idx + 3] = a;
-        }
-      }
-      
-      for (let x = 0; x < width; x++) {
-        for (let y = radius; y < height - radius; y++) {
-          let r = 0, g = 0, b = 0, a = 0;
-          for (let k = 0; k < verticalKernel.length; k++) {
-            const ky = y + k - radius;
-            const idx = (ky * width + x) * 4;
-            const weight = verticalKernel[k];
-            r += temp[idx] * weight;
-            g += temp[idx + 1] * weight;
-            b += temp[idx + 2] * weight;
-            a += temp[idx + 3] * weight;
-          }
-          const idx = (y * width + x) * 4;
-          result[idx] = Math.min(255, Math.max(0, (r + (offset || 0)) * (scale || 1)));
-          result[idx + 1] = Math.min(255, Math.max(0, (g + (offset || 0)) * (scale || 1)));
-          result[idx + 2] = Math.min(255, Math.max(0, (b + (offset || 0)) * (scale || 1)));
-          result[idx + 3] = data[idx + 3];
-        }
-      }
-      
-      return new ImageData(result, width, height);
-    }
-  `;
-
-  const workerUrl = URL.createObjectURL(
-    new Blob([workerScript], { type: 'application/javascript' }),
-  );
-
-  const worker = new Worker(workerUrl);
-
-  worker.addEventListener('error', () => {
-    URL.revokeObjectURL(workerUrl);
-  });
-
-  return worker;
+  return new Worker(new URL('../workers/photo.worker.ts', import.meta.url), { type: 'module' });
 }
 
 /**

@@ -39,6 +39,17 @@ If `package.json` has no server deps (express, fastify, etc.):
 - Skip API_CONTRACT.md
 - Set `PROJECT_TYPE=frontend-only`
 
+## Ponytail mode (planning + delegation)
+- Orchestrator loads the `ponytail` skill before writing docs/TASKS.md: every task
+  is the smallest complete change; unrequested scope is named in one line and skipped.
+- Every delegation prompt to a subagent includes: "Work in ponytail mode (full):
+  smallest complete change, use existing helpers and installed deps, no unrequested
+  features, prefer deletion, finish every caller/test your change touches."
+- Subagent files carry the same line, so ad-hoc dispatches get it too.
+
+## Node package manager
+- ALWAYS use pnpm (and pnpx) for node package management — never npm/yarn/npx.
+
 ## Quick start
 1. `pnpm install` (pnpm is canonical — pnpm-lock.yaml + pnpm-workspace.yaml; npm/yarn unsupported)
 2. `pnpm dev` (dev server, port 5174)

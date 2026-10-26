@@ -30,40 +30,47 @@ function hexToRgba(hex: string): [number, number, number, number] {
 export interface QRResult {
   data: any | null;
   canvas: HTMLCanvasElement | null;
-  version: number;
-  mask: number;
   generationTime: number;
   error: Error | null;
+}
+
+// Module-level memoized dynamic import: lean-qr is fetched once, later
+// generations skip the import machinery entirely (was: await import() on
+// every keystroke's generation).
+let leanQrPromise: Promise<typeof import('lean-qr')> | null = null;
+function loadLeanQR(): Promise<typeof import('lean-qr')> {
+  if (!leanQrPromise) {
+    leanQrPromise = import('lean-qr');
+  }
+  return leanQrPromise;
 }
 
 export function useQRGenerator(config: QRConfig) {
   const [result, setResult] = useState<QRResult>({
     data: null,
     canvas: null,
-    version: 0,
-    mask: 0,
     generationTime: 0,
     error: null,
   });
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const qrDataRef = useRef<any | null>(null);
+  const textRef = useRef(config.text);
+  textRef.current = config.text;
 
-  const generateQR = useCallback(async (text: string = config.text): Promise<QRResult> => {
+  const generateQR = useCallback(async (input?: string): Promise<QRResult> => {
+    const text = input ?? textRef.current;
     if (!text.trim()) {
       return {
         data: null,
         canvas: canvasRef.current,
-        version: 0,
-        mask: 0,
         generationTime: 0,
         error: new Error('QR content cannot be empty'),
       };
     }
 
     try {
-      const leanQR = await import('lean-qr');
-      const { generate, correction } = leanQR;
+      const { generate, correction } = await loadLeanQR();
 
       const startTime = performance.now();
 
@@ -96,8 +103,6 @@ export function useQRGenerator(config: QRConfig) {
       setResult({
         data: qr,
         canvas: canvasRef.current,
-        version: qr.size > 0 ? 1 : 0,
-        mask: 0,
         generationTime,
         error: null,
       });
@@ -105,8 +110,6 @@ export function useQRGenerator(config: QRConfig) {
       return {
         data: qr,
         canvas: canvasRef.current,
-        version: 1,
-        mask: 0,
         generationTime,
         error: null,
       };
@@ -122,13 +125,14 @@ export function useQRGenerator(config: QRConfig) {
       return {
         data: null,
         canvas: canvasRef.current,
-        version: 0,
-        mask: 0,
         generationTime: 0,
         error: new Error(errorMessage),
       };
     }
-  }, [config]);
+    // Primitive deps only: config object identity changes every render, which
+    // previously re-created generateQR (and re-fired effects) on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.size, config.level, config.colorDark, config.colorLight]);
 
   const downloadQR = useCallback((filename: string = 'qrcode.png'): boolean => {
     if (!result.canvas || !qrDataRef.current) {
@@ -174,23 +178,25 @@ export function useQRGenerator(config: QRConfig) {
     setResult({
       data: null,
       canvas: null,
-      version: 0,
-      mask: 0,
       generationTime: 0,
       error: null,
     });
     qrDataRef.current = null;
   }, []);
 
+  // Single debounced generation point. Keyed on primitives so a parent
+  // re-render with a fresh config object literal does not re-trigger it.
+  const {
+    text, size, level, colorDark, colorLight,
+  } = config;
   useEffect(() => {
+    if (!text.trim()) return undefined;
     const timeout = setTimeout(() => {
-      if (config.text) {
-        generateQR(config.text);
-      }
+      void generateQR(text);
     }, 200);
 
     return () => clearTimeout(timeout);
-  }, [config, generateQR]);
+  }, [text, size, level, colorDark, colorLight, generateQR]);
 
   return {
     ...result,
@@ -199,44 +205,5 @@ export function useQRGenerator(config: QRConfig) {
     copyQR,
     reset,
     canvasRef,
-  };
-}
-
-export function useQRWithPreview(config: QRConfig) {
-  const {
-    generateQR,
-    downloadQR,
-    copyQR,
-    reset,
-    canvasRef,
-    ...rest
-  } = useQRGenerator(config);
-
-  const [previewMode, setPreviewMode] = useState<'qr' | 'text'>('qr');
-
-  const togglePreviewMode = useCallback(() => {
-    setPreviewMode((prev) => (prev === 'qr' ? 'text' : 'qr'));
-  }, []);
-
-  const updateText = useCallback((newText: string) => {
-    generateQR(newText);
-  }, [generateQR]);
-
-  const updateSize = useCallback((_newSize: number) => {
-    if (rest.data) {
-      generateQR();
-    }
-  }, [generateQR, rest.data]);
-
-  return {
-    ...rest,
-    downloadQR,
-    copyQR,
-    reset,
-    canvasRef,
-    previewMode,
-    togglePreviewMode,
-    updateText,
-    updateSize,
   };
 }

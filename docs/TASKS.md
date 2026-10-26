@@ -1,55 +1,44 @@
-# TASKS.md — bg-remover ("Photo Tools") fix build
+# TASKS — Audit Fix Sweep (post ponytail-audit)
 
-PROJECT_TYPE: frontend-only (no server/api deps → backend stage + API_CONTRACT.md skipped)
+Mode: orchestrator (ponytail full). Two parallel implementers, disjoint files.
+Source: ponytail-audit report (20 findings). Smallest fix per finding; prefer deletion.
 
-## Findings (triage)
+## T1 — frontend-ui (agent: frontend)
+Owns: `src/components/*` (except none), `src/lib/pdfTools.ts`.
+| # | Finding | Fix |
+|---|---|---|
+| 1 | ImageCompressor.tsx:122-123 toast counts files added, not succeeded | count status 'done' |
+| 2 | PDFToolkit: pages 51+ unselectable (MAX_THUMBS_PER_DOC) | numbered page chips beyond cap |
+| 3 | ConvertToMarkdown.tsx:137-141 unmount doesn't abort docling worker | `doclingRef.current?.abort()` in cleanup |
+| 4 | PhotoEditor.tsx:200-211 write-only settings + fake "Avg Transfer" (140, 383-389) | delete settings persistence + metric |
+| 5 | QRGenerator.tsx:53-63 save on download + per-keystroke saves + dead copyQR | drop download-save, debounce effect, remove copyQR |
+| 6 | Layout.tsx:40-48 pathMap labels ≠ TOOLS labels | derive announce from TOOLS, delete pathMap |
+| 7 | BackgroundRemover.tsx:92-93 closure isProcessing guard | ref guard |
+| 8 | HeicConverter.tsx:88-99 + ImageCompressor.tsx:128-139 no running guard | early return + toast while busy |
+| 9 | Object URLs not revoked on unmount (BackgroundRemover, HeicConverter) | unmount cleanups |
+| 10 | ConvertToMarkdown reset block ×3 (371-384, 454-470, 540-556) | one resetConversionState() callback |
+Acceptance: `pnpm run typecheck` + `pnpm run lint` clean (0 errors; warnings only if pre-existing).
 
-**Gates at triage:** typecheck ✅ (exit 0), lint ✅ (exit 0), vite build ✅ (5.8s).
-**Broken:** worker pool (real bugs), no tests, no git, no README, mixed lockfiles, dead deps, AGENTS.md quickstart commands broken (`pnpx tsc` resolves fake `tsc` package).
+## T2 — core-libs (agent: general)
+Owns: `src/hooks/*`, `src/lib/{validators,storage,doclingClient}.ts`, `src/types/*`, `src/workers/*` (photo worker), `src/main.tsx`, `vite.config.ts`, `playwright.config.ts`, `package.json`.
+| # | Finding | Fix |
+|---|---|---|
+| 11 | useWorker.ts:112-188 no request ids (race) | id in message, match in listener |
+| 12 | useWorker.ts:229-389 inline worker re-implements 6 filters | move worker to `?worker` module importing filters.ts (verify filters.ts is DOM-free; smoke test covers photo editor grayscale) |
+| 13 | useWorker.ts:391-399 blob URL leak | revoke on pool teardown |
+| 14 | validators.ts 226L dead | delete file |
+| 15 | storage.ts ~200L dead + duplicated QR defaults | keep getStorageItem/setStorageItem/saveQRConfig only |
+| 16 | types: models.ts + filesystem.d.ts dead; worker.ts/events.ts trim; useQRWithPreview dead (useQRGenerator.ts:225-262) | delete/trim |
+| 17 | ErrorBoundary not mounted; withErrorBoundary + barrels dead | wrap `<App/>` in main.tsx, delete withErrorBoundary.tsx + components/index.ts + hooks/index.ts |
+| 18 | doclingClient.ts:427-444 error dropped when no wait armed → hang | surface via handlers.onError when running |
+| 19 | classifyDoc extracts text twice on fast path | classifyDoc returns per-page markdown; extractTextMarkdown reuses |
+| 20 | vite.config.ts:31 @pdf2md/core comment + playwright.config.ts verify.mjs comment stale | update |
+| 21 | husky + lint-staged installed, zero hooks | remove deps + prepare script |
+Acceptance: same as T1.
 
-### Bugs
-| # | File | Bug |
-|---|------|-----|
-| B1 | `src/hooks/useWorker.ts` | Inline worker script never answers `{type:'init'}` with `{type:'ready'}` (destructures `data` on init → throws → `error`). All 4 workers time out on every mount. |
-| B2 | `src/hooks/useWorker.ts` | Inline convolution hardcodes 3-tap loop for 5-tap Gaussian kernel → wrong blur/sharpen/emboss results when worker is used. |
-| B3 | `src/components/PhotoEditor.tsx` | Worker badge probed with a 2x2 image; shows "Worker Active" while hook silently falls back to main thread. Status must come from hook. |
-| B4 | `src/components/PhotoEditor.tsx` | `handleReset` persists the OLD (pre-reset) adjustment values. |
-| B5 | `src/components/A11yProvider.tsx` | Mount effect fires "Processing complete." announcement on every page load. |
+## T3 — orchestrator: gates
+- `pnpm run typecheck` → `pnpm run lint` → `pnpm run test` (13/13) → `pnpm run build`.
+- Conflict check between T1/T2 edits (imports: PhotoEditor/QRGenerator ↔ storage.ts; photo editor ↔ useWorker API).
 
-### Hygiene
-| # | Item |
-|---|------|
-| H1 | Mixed lockfiles: `package-lock.json` (npm) alongside canonical `pnpm-lock.yaml` → delete npm one |
-| H2 | Unused dep `brighten@0.0.1` in package.json (zero refs) → remove |
-| H3 | `build` script runs full `tsc` emit into dist then vite rebuilds → `tsc --noEmit && vite build` |
-| H4 | `prepare: husky install` but husky is v9 (wants `husky`) |
-| H5 | No `.gitignore` (node_modules, dist, e2e browser-profile caches, test artifacts) |
-| H6 | No `README.md` (G4 requires) |
-| H7 | No Playwright config + specs; `e2e/` has manual-only scripts (verify.mjs downloads 115MB model — stays manual, excluded from gate) |
-| H8 | AGENTS.md quickstart uses broken `pnpx` commands |
-| H9 | No git repo |
-
-## Task breakdown
-
-| ID | Task | Owner | Stage | Gate |
-|----|------|-------|-------|------|
-| T1 | This doc + fix list | orchestrator | 0 | — |
-| T2 | Fix B1+B2 worker init/ready + convolution | frontend | 3 | G3 |
-| T3 | Fix B3+B4 PhotoEditor status/reset | frontend | 3 | G3 |
-| T4 | Fix B5 A11yProvider mount announce | frontend | 3 | G3 |
-| T5 | H1–H4 package.json/lockfile/deps | devops | 3 | G3 |
-| T6 | H7 playwright.config.ts + e2e smoke specs | qa | 4 | G3 |
-| T7 | H5–H6 .gitignore + README | devops | 5 | G4 |
-| T8 | H8 AGENTS.md quickstart update | orchestrator | 5 | G4 |
-| T9 | H9 git init + initial commit | orchestrator | 5 | G4 |
-| G1 | PRD: goals/stories/acceptance | pm | 1 | G1 |
-| G2 | ARCHITECTURE.md (frontend-only, no API_CONTRACT) | architect | 2 | G2 |
-| G3 | typecheck + lint + all tests pass | qa | 4 | G3 |
-| G4 | build + preview + README | devops | 5 | G4 |
-
-## Pipeline
-1. Requirements → PRD.md → G1
-2. Architecture → ARCHITECTURE.md → G2
-3. Implement (T2–T5, parallel: frontend + devops)
-4. Test (T6) → G3
-5. Build/Verify (T7–T9) → G4
+## Skipped by design
+- No new deps. No behavior features. Docs (PRD/ARCHITECTURE/README) untouched — no user-facing feature changes.

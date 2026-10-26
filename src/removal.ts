@@ -1,10 +1,11 @@
 import { pipeline, RawImage } from '@huggingface/transformers';
+import { refineMask } from './lib/maskRefine';
 
 type SegmentationPipeline = (input: RawImage | Blob | string) => Promise<{ mask: RawImage }[]>;
 
 let segmenter: SegmentationPipeline | null = null;
 
-// Model paths - ModNet for browser compatibility
+// ModNet for browser compatibility; refinement (maskRefine) adds edge cleanup
 const MODEL = 'Xenova/modnet';
 
 // Load & cache the model once. Call warmup() to pre-load the model.
@@ -15,7 +16,9 @@ export async function warmup(): Promise<SegmentationPipeline> {
     }
     return segmenter;
   } catch (error) {
-    throw new Error(`Failed to load ModNet model: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Failed to load background removal model: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -36,6 +39,14 @@ export async function removeBackground(imageBlob: Blob): Promise<Blob> {
 
   // Resize mask to match original image dimensions
   const mask = await output.mask.resize(image.width, image.height);
+
+  // Clean up mask edges: dilate + feather + alpha boost removes dark fringe
+  // and half-transparent halos around the subject.
+  const refined = refineMask(mask.data, mask.width, mask.height);
+  const { channels } = mask;
+  for (let i = 0; i < refined.length; i += 1) {
+    mask.data[i * channels] = Math.round(refined[i] * 255);
+  }
 
   // Apply mask as alpha channel to create cutout
   const cutout = image.clone();

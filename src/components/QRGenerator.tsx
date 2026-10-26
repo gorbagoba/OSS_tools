@@ -17,9 +17,7 @@ export function QRGenerator(): React.JSX.Element {
 
   // Use QR generator hook
   const {
-    generateQR,
     downloadQR,
-    copyQR: _copyQR,
     reset,
     canvasRef: qrCanvasRef,
   } = useQRGenerator({
@@ -48,25 +46,11 @@ export function QRGenerator(): React.JSX.Element {
     setColorLight(config.colorLight);
   }, []);
 
-  // Generate QR code when text or options change
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      generateQR(text);
-    }, 200);
-
-    return () => clearTimeout(timeout);
-  }, [text, size, colorDark, colorLight, errorLevel, generateQR]);
+  // QR generation is handled by the hook's own debounced effect — a second
+  // effect here caused every change to generate the QR code twice.
 
   const handleDownload = () => {
-    if (downloadQR(`qrcode-${text.substring(0, 20)}.png`)) {
-      // Save download preference
-      saveQRConfig({
-        defaultText: text,
-        defaultSize: size,
-        colorDark,
-        colorLight,
-      });
-    }
+    downloadQR(`qrcode-${text.substring(0, 20)}.png`);
   };
 
   const handleClear = () => {
@@ -74,15 +58,18 @@ export function QRGenerator(): React.JSX.Element {
     reset();
   };
 
-  // Update config when values change
+  // Update config when values change (debounced — fires once typing pauses)
   useEffect(() => {
-    saveQRConfig({
-      defaultText: text,
-      defaultSize: size,
-      defaultErrorLevel: errorLevel,
-      colorDark,
-      colorLight,
-    });
+    const timer = window.setTimeout(() => {
+      saveQRConfig({
+        defaultText: text,
+        defaultSize: size,
+        defaultErrorLevel: errorLevel,
+        colorDark,
+        colorLight,
+      });
+    }, 200);
+    return () => window.clearTimeout(timer);
   }, [text, size, errorLevel, colorDark, colorLight]);
 
   return (

@@ -1,23 +1,38 @@
 /**
- * BackgroundRemover component with ModNet
+ * BackgroundRemover component with ModNet and edge refinement
  * @category components
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { removeBackground } from '../removal';
+import { removeBackground, warmup } from '../removal';
 import { Spinner } from './Spinner';
+import { useToast } from './ToastProvider';
 import type { LogEntry } from '../types/events';
 
 export type { LogEntry };
 
 // Main BackgroundRemover component
 export function BackgroundRemover(): React.JSX.Element {
+  const toast = useToast();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [eta, setEta] = useState<number | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [originalUrl, setOriginalUrl] = useState<string | null>(null);
+  const [modelPreloaded, setModelPreloaded] = useState(false);
+  const [preloading, setPreloading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const lastImageRef = useRef<File | null>(null);
+  // Ref guard against stale-closure double processing (two events same tick)
+  const processingRef = useRef(false);
+
+  // Revoke object URLs on unmount
+  useEffect(() => () => {
+    if (originalUrl) URL.revokeObjectURL(originalUrl);
+  }, [originalUrl]);
+  useEffect(() => () => {
+    if (resultImage) URL.revokeObjectURL(resultImage);
+  }, [resultImage]);
 
   const addLog = (message: string, type: LogEntry['type'] = 'info') => {
     const id = Math.random().toString(36).substring(7);
@@ -85,11 +100,13 @@ export function BackgroundRemover(): React.JSX.Element {
   };
 
   const processImage = async (file: File) => {
-    if (isProcessing) return;
+    if (isProcessing || processingRef.current) return;
 
+    processingRef.current = true;
+    lastImageRef.current = file;
     setIsProcessing(true);
     clearLogs();
-    addLog('Image received. Starting ModNet...', 'pending');
+    addLog('Image received. Starting background removal with ModNet...', 'pending');
 
     try {
       // Create preview URL
@@ -111,9 +128,11 @@ export function BackgroundRemover(): React.JSX.Element {
       setEta(elapsed);
       addLog(`ModNet completed in ${(elapsed / 1000).toFixed(1)}s.`, 'info');
       addLog('Background removal complete.', 'info');
+      setModelPreloaded(true);
     } catch (error) {
       addLog(`Error: ${error instanceof Error ? error.message : String(error)}`, 'error');
     } finally {
+      processingRef.current = false;
       setIsProcessing(false);
     }
   };
@@ -137,8 +156,33 @@ export function BackgroundRemover(): React.JSX.Element {
       const blob = await response.blob();
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
       addLog('Copied to clipboard!', 'info');
+      toast.show('Copied to clipboard!', 'success');
     } catch (error) {
       addLog('Copy failed. Use Download instead.', 'error');
+      toast.show('Copy failed. Use Download instead.', 'error');
+    }
+  };
+
+  const handlePreloadModel = async () => {
+    if (isProcessing || preloading) return;
+
+    setPreloading(true);
+    addLog('Downloading ModNet model (~115MB) — cached after first run.', 'pending');
+    try {
+      await warmup();
+      setModelPreloaded(true);
+      addLog('Model cached — removal now starts instantly.', 'info');
+      toast.show('Model cached — next removal skips the download', 'success');
+      const last = lastImageRef.current;
+      if (last) {
+        addLog('Re-running removal on last image with cached model...', 'pending');
+        await processImage(last);
+      }
+    } catch (error) {
+      addLog(`Model preload failed: ${error instanceof Error ? error.message : String(error)}`, 'error');
+      toast.show('Model preload failed', 'error');
+    } finally {
+      setPreloading(false);
     }
   };
 
@@ -156,13 +200,14 @@ export function BackgroundRemover(): React.JSX.Element {
     <div className="card">
       <h1 className="text-2xl font-bold mb-4">Background Remover</h1>
       <p className="text-textSecondary mb-4">
-        Paste an image below or anywhere on the page. Runs 100% in your browser using local AI with ModNet.
+        Paste an image below or anywhere on the page. Runs 100% in your browser using local AI with ModNet and edge refinement.
       </p>
 
       <div className="border-2 border-border rounded-xl p-8 text-center">
-        <div className="mb-4">
-          {originalUrl && !resultImage && (
+        <div className="mb-4 flex flex-wrap gap-4 justify-center items-start">
+          {originalUrl && (
             <div className="inline-block max-w-full max-h-[400px]">
+              <p className="text-xs text-textSecondary mb-1 text-center">Original</p>
               <img
                 src={originalUrl}
                 alt="Original"
@@ -172,6 +217,7 @@ export function BackgroundRemover(): React.JSX.Element {
           )}
           {resultImage && (
             <div className="inline-block max-w-full max-h-[400px]">
+              <p className="text-xs text-textSecondary mb-1 text-center">Result</p>
               <img
                 src={resultImage}
                 alt="Result"
@@ -195,6 +241,21 @@ export function BackgroundRemover(): React.JSX.Element {
           onDragOver={handleDragOver}
           disabled={isProcessing}
         />
+
+        {!isProcessing && (!modelPreloaded || lastImageRef.current) && (
+          <button
+            type="button"
+            onClick={handlePreloadModel}
+            disabled={preloading}
+            className="mt-4 px-3 py-1.5 text-xs rounded-lg border border-border bg-input hover:border-primary/60 transition-colors disabled:opacity-60"
+          >
+            {preloading
+              ? 'Preloading model…'
+              : lastImageRef.current
+                ? 'Preload model & re-run last image'
+                : 'Preload model (~115MB, one-time)'}
+          </button>
+        )}
 
         {(resultImage || originalUrl) && (
           <div className="flex gap-4 mt-6 justify-center">

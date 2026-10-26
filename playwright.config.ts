@@ -3,9 +3,9 @@ import { defineConfig } from '@playwright/test';
 /**
  * Playwright config — smoke gate (G3).
  *
- * testMatch '*.spec.ts' intentionally EXCLUDES the pre-existing manual
- * scripts e2e/verify.mjs and e2e/model-test.mjs (ModNet 115MB download,
- * manual verification only — not part of the automated gate).
+ * testMatch '*.spec.ts' intentionally EXCLUDES the manual script
+ * e2e/model-test.mjs (ModNet 115MB download, manual verification only —
+ * not part of the automated gate).
  */
 export default defineConfig({
   testDir: './e2e',

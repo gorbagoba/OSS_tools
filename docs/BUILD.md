@@ -7,7 +7,7 @@ Date: 2026-10-18 · Repo: `C:\Users\user\bg-remover` · PROJECT_TYPE: frontend-o
 | Check | Command | Result |
 |---|---|---|
 | Production build | `pnpm run build` (`tsc --noEmit && vite build`) | PASS — vite build ~6.9s, dist/ emitted |
-| Preview serves | `pnpm run preview -- --port 4175 --strictPort` | PASS — HTTP 200, body = built index.html (`<title>Photo Tools</title>`) |
+| Preview serves | `pnpm run preview -- --port 4175 --strictPort` | PASS — HTTP 200, body = built index.html (`<title>OSS Tools</title>` at time of verify; title later renamed from "Photo Tools") |
 | README works | every quickstart/script command executed | PASS — see below |
 | Fresh install | `pnpm install --frozen-lockfile` | PASS — "Lockfile is up to date" (pnpm 12.10.1) |
 | Full gate re-run | `pnpm run typecheck` + `pnpm run lint` + `pnpm run test` | PASS — 0 / 0 / 4 of 4 e2e (7.7s) |

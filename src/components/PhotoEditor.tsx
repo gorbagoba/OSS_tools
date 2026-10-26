@@ -4,13 +4,12 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import type { FilterType } from '../workers/utils';
+import type { FilterType } from '../types/filters';
 import { useWorker } from '../hooks/useWorker';
 import { applyAdjustments, applyFilter } from '../lib/filters';
-import { getStorageItem, saveStorageItem } from '../lib/storage';
 
 // Re-export FilterType for component
-export type { FilterType } from '../workers/utils';
+export type { FilterType } from '../types/filters';
 
 export const PhotoEditor: React.FC = () => {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
@@ -26,15 +25,16 @@ export const PhotoEditor: React.FC = () => {
   const [workerMetrics, setWorkerMetrics] = useState({
     totalRequests: 0,
     avgProcessingTime: 0,
-    avgTransferTime: 0,
     workers: 0,
   });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const metricsRef = useRef({
     processingTimes: [] as number[],
-    transferTimes: [] as number[],
   });
   const imageLoadedRef = useRef(false);
+  // Cached worker-filtered base (originalImageData + activeFilter). Sliders
+  // redraw from this instead of re-running the (expensive) filter each time.
+  const filteredBaseRef = useRef<ImageData | null>(null);
 
   // Initialize worker hook
   const { status, processWithWorker: processWithWorkerHook } = useWorker();
@@ -45,6 +45,11 @@ export const PhotoEditor: React.FC = () => {
       ? 'error'
       : 'loading';
 
+  // Cap editing resolution: full-size photos (12MP+) make per-slider-tick
+  // pixel loops and canvas ops janky. 2048px keeps previews crisp while
+  // cutting per-edit work by ~4-16x. Downloads export the preview resolution.
+  const MAX_PREVIEW_DIM = 2048;
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -53,44 +58,37 @@ export const PhotoEditor: React.FC = () => {
     reader.onload = (event) => {
       const img = new Image();
       img.onload = () => {
+        // Draw happens in the [image] effect below — the canvas is only
+        // mounted after this state update commits (fixes blank first upload).
+        filteredBaseRef.current = null;
         setImage(img);
-        processImage(img);
       };
       img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
   };
 
-  const processImage = (img: HTMLImageElement) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+  // Draw the uploaded image to the canvas once it is mounted (image state set).
+  useEffect(() => {
+    if (!image || !canvasRef.current) return;
 
-    // Set canvas size to match image
-    canvas.width = img.width;
-    canvas.height = img.height;
+    const canvas = canvasRef.current;
+    const scale = Math.min(1, MAX_PREVIEW_DIM / Math.max(image.width, image.height));
+    canvas.width = Math.round(image.width * scale);
+    canvas.height = Math.round(image.height * scale);
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.drawImage(img, 0, 0);
-
-    const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    setOriginalImageData(data);
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    setOriginalImageData(ctx.getImageData(0, 0, canvas.width, canvas.height));
     imageLoadedRef.current = true;
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [image]);
 
   const handleAdjustmentChange = (key: keyof typeof adjustments, value: number) => {
-    const newAdjustments = { ...adjustments, [key]: value };
-    setAdjustments(newAdjustments);
-
-    if (originalImageData && imageLoadedRef.current) {
-      // Recalculate and redraw
-      let result = applyAdjustments(originalImageData, newAdjustments);
-      if (activeFilter) {
-        result = applyFilter(result, activeFilter);
-      }
-      drawToCanvas(result);
-    }
+    // Redraw happens in the [adjustments, activeFilter] effect (rAF-coalesced).
+    setAdjustments((prev) => ({ ...prev, [key]: value }));
   };
 
   const handleFilterClick = async (filter: FilterType) => {
@@ -99,15 +97,19 @@ export const PhotoEditor: React.FC = () => {
     if (activeFilter === filter) {
       // Toggle off
       setActiveFilter(null);
-      const result = applyAdjustments(originalImageData, adjustments);
-      drawToCanvas(result);
+      filteredBaseRef.current = null;
     } else {
       setActiveFilter(filter);
       setIsProcessing(true);
       try {
+        // Filter once via worker (main-thread fallback inside), then cache.
+        // Slider moves afterwards only run the cheap fused adjustments pass.
         const filtered = await processWithWorker(originalImageData, filter);
-        const result = applyAdjustments(filtered, adjustments);
-        drawToCanvas(result);
+        filteredBaseRef.current = filtered;
+        // The redraw effect fires when activeFilter flips, which happens
+        // BEFORE the worker resolves, so it still draws the unfiltered base.
+        // Draw explicitly now that the cached filtered base exists.
+        drawToCanvas(applyAdjustments(filtered, adjustments));
       } finally {
         setIsProcessing(false);
       }
@@ -132,24 +134,19 @@ export const PhotoEditor: React.FC = () => {
       // Track metrics
       if (result) {
         metricsRef.current.processingTimes.push(result.processingTime);
-        metricsRef.current.transferTimes.push(result.processingTime / 10); // Estimate
 
         // Keep only last 100 samples
         if (metricsRef.current.processingTimes.length > 100) {
           metricsRef.current.processingTimes.shift();
-          metricsRef.current.transferTimes.shift();
         }
 
         // Update metrics state
         const avgProcessing = metricsRef.current.processingTimes.reduce((a, b) => a + b, 0)
           / metricsRef.current.processingTimes.length;
-        const avgTransfer = metricsRef.current.transferTimes.reduce((a, b) => a + b, 0)
-          / metricsRef.current.transferTimes.length;
         setWorkerMetrics((prev) => ({
           ...prev,
           totalRequests: prev.totalRequests + 1,
           avgProcessingTime: avgProcessing,
-          avgTransferTime: avgTransfer,
           workers: navigator.hardwareConcurrency || 4,
         }));
 
@@ -162,16 +159,20 @@ export const PhotoEditor: React.FC = () => {
     }
   };
 
-  // Redraw preview when adjustments change (for non-sliders)
+  // Redraw preview when adjustments or filter change. rAF coalesces rapid
+  // slider events into one draw per frame; filtered base is cached so each
+  // redraw is a single fused adjustments pass (no filter re-computation).
   useEffect(() => {
-    if (originalImageData && imageLoadedRef.current) {
-      let result = applyAdjustments(originalImageData, adjustments);
-      if (activeFilter) {
-        result = applyFilter(result, activeFilter);
-      }
-      drawToCanvas(result);
+    if (!originalImageData || !imageLoadedRef.current) {
+      return undefined;
     }
-  }, [adjustments, activeFilter]);
+
+    const raf = requestAnimationFrame(() => {
+      const base = filteredBaseRef.current ?? originalImageData;
+      drawToCanvas(applyAdjustments(base, adjustments));
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [adjustments, activeFilter, originalImageData]);
 
   const handleReset = () => {
     const resetAdjustments = {
@@ -181,24 +182,11 @@ export const PhotoEditor: React.FC = () => {
       exposure: 0,
     };
     setActiveFilter(null);
+    filteredBaseRef.current = null;
     setAdjustments(resetAdjustments);
     if (originalImageData && imageLoadedRef.current) {
       drawToCanvas(originalImageData);
     }
-
-    // Save preferences
-    const prefs = getStorageItem('photo_editor_settings', {
-      brightness: 0,
-      contrast: 0,
-      saturation: 0,
-      exposure: 0,
-      lastFilter: null,
-    });
-    saveStorageItem('photo_editor_settings', {
-      ...prefs,
-      ...resetAdjustments,
-      lastFilter: 'none',
-    });
   };
 
   const handleDownload = () => {
@@ -257,20 +245,18 @@ export const PhotoEditor: React.FC = () => {
         <div className="bg-input border border-border rounded-xl p-6 flex flex-col items-center min-h-[400px]">
           <h3 className="text-lg font-medium mb-4">Preview</h3>
 
-          <div className="relative w-full max-w-full">
-            {image ? (
-              <canvas
-                ref={canvasRef}
-                width={image.width}
-                height={image.height}
-                className="max-w-full max-h-[400px] rounded-lg"
-              />
-            ) : (
+          <div className="relative w-full max-w-full flex justify-center">
+            {!image && (
               <div className="text-textSecondary text-center py-20">
                 <p className="text-lg">Upload an image to start editing</p>
                 <p className="text-sm mt-2">Supports PNG, JPG, JPEG, GIF, WebP</p>
               </div>
             )}
+            {/* Always mounted: the draw effect needs the ref on first upload */}
+            <canvas
+              ref={canvasRef}
+              className={image ? 'max-w-full max-h-[400px] rounded-lg' : 'hidden'}
+            />
           </div>
 
           <label className="mt-8 px-6 py-3 bg-input border border-border rounded-lg hover:border-primary transition-colors cursor-pointer text-sm font-medium">
@@ -368,14 +354,6 @@ export const PhotoEditor: React.FC = () => {
                     <div className="text-gray-400 mb-1">Avg Processing</div>
                     <div className="text-white font-mono">
                       {workerMetrics.avgProcessingTime.toFixed(2)}
-                      {' '}
-                      ms
-                    </div>
-                  </div>
-                  <div className="bg-gray-800/50 rounded-lg p-3">
-                    <div className="text-gray-400 mb-1">Avg Transfer</div>
-                    <div className="text-white font-mono">
-                      {workerMetrics.avgTransferTime.toFixed(2)}
                       {' '}
                       ms
                     </div>
